@@ -29,5 +29,5 @@ firebase-debug.log
 
 service-account.json
 *.log
-*.txt
+request_log.txt
 output.txt
