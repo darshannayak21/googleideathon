@@ -1,0 +1,118 @@
+const API_BASE = "/api";
+
+export interface ChatMessage {
+  role: "user" | "model";
+  content: string;
+}
+
+export interface ChatResponse {
+  reply: string;
+  mood?: string;
+  stress_level?: number;
+  summary?: string;
+}
+
+export interface JournalSession {
+  id: string;
+  title: string;
+  createdAt: string;
+  updatedAt: string;
+  messageCount: number;
+}
+
+export interface JournalSummary {
+  id: string;
+  sessionId: string;
+  summary: string;
+  mood?: string;
+  tags?: string[];
+  createdAt: string;
+}
+
+export async function sendMessage(
+  token: string,
+  message: string,
+  history: ChatMessage[],
+  sessionId?: string
+): Promise<ChatResponse> {
+  const res = await fetch(`${API_BASE}/chat`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${token}`,
+    },
+    body: JSON.stringify({ message, history, session_id: sessionId }),
+  });
+
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({ detail: "Request failed" }));
+    throw new Error(err.detail || `API error: ${res.status}`);
+  }
+
+  return res.json();
+}
+
+export async function getSessions(token: string): Promise<JournalSession[]> {
+  const res = await fetch(`${API_BASE}/sessions`, {
+    headers: { Authorization: `Bearer ${token}` },
+  });
+  if (!res.ok) throw new Error("Failed to fetch sessions");
+  const data = await res.json();
+  return data.sessions;
+}
+
+export async function getSessionMessages(
+  token: string,
+  sessionId: string
+): Promise<ChatMessage[]> {
+  const res = await fetch(`${API_BASE}/sessions/${sessionId}/messages`, {
+    headers: { Authorization: `Bearer ${token}` },
+  });
+  if (!res.ok) throw new Error("Failed to fetch messages");
+  const data = await res.json();
+  return data.messages;
+}
+
+export async function summarizeSession(
+  token: string,
+  sessionId: string
+): Promise<JournalSummary> {
+  const res = await fetch(`${API_BASE}/summarize`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${token}`,
+    },
+    body: JSON.stringify({ session_id: sessionId }),
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({ detail: `HTTP ${res.status}` }));
+    throw new Error(err.detail || `Summarize failed: ${res.status}`);
+  }
+  return res.json();
+}
+
+export async function getSummaries(token: string): Promise<JournalSummary[]> {
+  const res = await fetch(`${API_BASE}/summaries`, {
+    headers: { Authorization: `Bearer ${token}` },
+  });
+  if (!res.ok) throw new Error("Failed to fetch summaries");
+  const data = await res.json();
+  return data.summaries;
+}
+
+export async function lookback(
+  token: string,
+  query: string
+): Promise<{ insight: string; relatedSummaries: JournalSummary[] }> {
+  const res = await fetch(`${API_BASE}/insights`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${token}`,
+    },
+    body: JSON.stringify({ query }),
+  });
+  if (!res.ok) throw new Error("Failed to get insights");
+  return res.json();
+}
