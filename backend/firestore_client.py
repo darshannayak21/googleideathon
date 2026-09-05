@@ -91,3 +91,28 @@ def get_user_summaries(uid: str, limit: int = 50) -> List[Dict[str, Any]]:
         .limit(limit)
     )
     return [{"id": doc.id, **doc.to_dict()} for doc in summaries_ref.stream()]
+
+def delete_user_data(uid: str) -> None:
+    """
+    Wipes all user data from Firestore (sessions, messages, summaries, and the root document).
+    This simulates a GDPR Crypto-Nuke.
+    """
+    user_ref = db.collection("users").document(uid)
+    
+    # 1. Delete all summaries
+    summaries = user_ref.collection("summaries").stream()
+    for summary in summaries:
+        summary.reference.delete()
+        
+    # 2. Delete all sessions and their nested messages
+    sessions = user_ref.collection("sessions").stream()
+    for session in sessions:
+        # Delete nested messages
+        messages = session.reference.collection("messages").stream()
+        for message in messages:
+            message.reference.delete()
+        # Delete session doc
+        session.reference.delete()
+        
+    # 3. Delete root user document
+    user_ref.delete()

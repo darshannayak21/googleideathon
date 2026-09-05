@@ -1,6 +1,6 @@
 import uuid
 from fastapi import APIRouter, Depends, HTTPException
-from backend.models import ChatRequest, ChatResponse
+from backend.models import ChatRequest, ChatResponse, SynthesisRequest, SynthesisResponse
 from backend.auth import verify_token
 from backend.firestore_client import create_or_update_session, add_message_to_session, get_session_messages
 from backend.gemini_client import chat_turn
@@ -19,7 +19,7 @@ async def chat(request: ChatRequest, uid: str = Depends(verify_token)):
     history = [{"role": msg.role, "content": msg.content} for msg in request.history]
     
     try:
-        reply_text, mood, stress_level = chat_turn(history, request.message)
+        reply_text, mood, stress_level = chat_turn(history, request.message, request.persona)
         
         # Save to Firestore under /users/{uid}/...
         create_or_update_session(uid, session_id, request.message[:80])
@@ -38,3 +38,17 @@ async def chat(request: ChatRequest, uid: str = Depends(verify_token)):
             f.write(traceback.format_exc())
         logger.error(f"Chat failed: {e}")
         raise HTTPException(status_code=500, detail="Failed to process chat")
+
+@router.post("/chat/synthesis", response_model=SynthesisResponse)
+async def synthesize_trends_endpoint(request: SynthesisRequest, uid: str = Depends(verify_token)):
+    try:
+        from backend.gemini_client import synthesize_trends
+        
+        # Convert list of Pydantic models to list of dicts for the client
+        summaries_dict = [{"mood": s.mood, "summary": s.summary} for s in request.summaries]
+        
+        advice = synthesize_trends(summaries_dict)
+        return SynthesisResponse(advice=advice)
+    except Exception as e:
+        logger.error(f"Synthesis failed: {e}")
+        raise HTTPException(status_code=500, detail="Failed to synthesize trends")

@@ -7,8 +7,8 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from backend.gemini_client import gemini
-from backend.routers import chat, sessions, summarize, insights
-from backend.secrets import fetch_gemini_key
+from backend.routers import chat, sessions, summarize, insights, security
+from backend.secret_manager import fetch_gemini_key
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -73,6 +73,7 @@ app.include_router(chat.router, prefix="/api", tags=["chat"])
 app.include_router(sessions.router, prefix="/api", tags=["sessions"])
 app.include_router(summarize.router, prefix="/api", tags=["summarize"])
 app.include_router(insights.router, prefix="/api", tags=["insights"])
+app.include_router(security.router, prefix="/api/security", tags=["security"])
 
 if __name__ == "__main__":
     import uvicorn

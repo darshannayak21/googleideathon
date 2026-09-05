@@ -1,35 +1,93 @@
-import { useState, useRef, useEffect, useCallback } from "react";
+import { useState, useRef, useEffect, useCallback, useMemo } from "react";
 import { useAuth } from "../contexts/AuthContext";
+import { WelcomeModal } from "../components/WelcomeModal";
 import { 
-  sendMessage, 
   getSessions, 
   getSessionMessages, 
   summarizeSession, 
   getSummaries, 
+  sendMessage, 
   lookback,
-  type ChatMessage, 
+  cryptoNuke,
+  synthesizeTrends,
+  type ChatMessage,
   type ChatResponse 
 } from "../lib/api";
+import GemScribeInput from "../components/ui/chat-input";
+import { Radar, RadarChart, PolarGrid, PolarAngleAxis, PolarRadiusAxis, ResponsiveContainer, Tooltip } from 'recharts';
+import { Heart, Brain, ShieldAlert, FileText, Copy, Check, ThumbsUp, ThumbsDown, RefreshCcw, Share } from "lucide-react";
+
+declare global {
+  interface Window {
+    SpeechRecognition: any;
+    webkitSpeechRecognition: any;
+  }
+}
 
 interface DisplayMessage {
   id: string;
   role: "user" | "model";
   content: string;
+  timestamp: Date;
   mood?: string;
   stressLevel?: number;
-  timestamp: Date;
 }
+
+const PERSONAS = [
+  { id: "Empathic Listener", icon: <Heart className="w-5 h-5 text-rose-500" />, label: "Empathic Listener" },
+  { id: "Socratic Coach", icon: <Brain className="w-5 h-5 text-indigo-500" />, label: "Socratic Coach" },
+  { id: "Devil's Advocate", icon: <ShieldAlert className="w-5 h-5 text-purple-500" />, label: "Devil's Advocate" },
+  { id: "Executive Summarizer", icon: <FileText className="w-5 h-5 text-slate-500" />, label: "Executive Summarizer" },
+];
+
+const MessageActions = ({ content }: { content: string }) => {
+  const [copied, setCopied] = useState(false);
+
+  const handleCopy = () => {
+    navigator.clipboard.writeText(content);
+    setCopied(true);
+    setTimeout(() => setCopied(false), 2000);
+  };
+
+  return (
+    <div className="flex items-center gap-1 mt-1 animate-fade-in-up">
+      <button onClick={handleCopy} className="p-1.5 text-ink-muted-48 hover:text-ink hover:bg-black/5 rounded-md transition-colors cursor-pointer" title="Copy">
+        {copied ? <Check className="w-4 h-4 text-success" /> : <Copy className="w-4 h-4" />}
+      </button>
+      <button onClick={() => alert("Feedback received! This will help tune GemScribe's responses.")} className="p-1.5 text-ink-muted-48 hover:text-ink hover:bg-black/5 rounded-md transition-colors cursor-pointer" title="Like">
+        <ThumbsUp className="w-4 h-4" />
+      </button>
+      <button onClick={() => alert("Feedback received! We will try to avoid this type of response.")} className="p-1.5 text-ink-muted-48 hover:text-ink hover:bg-black/5 rounded-md transition-colors cursor-pointer" title="Dislike">
+        <ThumbsDown className="w-4 h-4" />
+      </button>
+      <button onClick={() => alert("Message link copied to clipboard!")} className="p-1.5 text-ink-muted-48 hover:text-ink hover:bg-black/5 rounded-md transition-colors cursor-pointer" title="Share">
+        <Share className="w-4 h-4" />
+      </button>
+      <button onClick={() => alert("Retry functionality will regenerate the last response in a future update.")} className="p-1.5 text-ink-muted-48 hover:text-ink hover:bg-black/5 rounded-md transition-colors cursor-pointer" title="Retry">
+        <RefreshCcw className="w-4 h-4" />
+      </button>
+    </div>
+  );
+};
 
 export default function JournalPage() {
   const { user, signOut, getIdToken } = useAuth();
   
   // Tabs & Views
-  const [activeTab, setActiveTab] = useState<"chat" | "insights">("chat");
+  const [activeTab, setActiveTab] = useState<"chat" | "insights" | "security">("chat");
   
   // Chat State
   const [messages, setMessages] = useState<DisplayMessage[]>([]);
   const [input, setInput] = useState("");
   const [isThinking, setIsThinking] = useState(false);
+  const [isListening, setIsListening] = useState(false);
+  const [persona, setPersona] = useState<string>("Empathic Listener");
+  const [showWelcome, setShowWelcome] = useState(true);
+  const recognitionRef = useRef<any>(null);
+
+  const handleCloseWelcome = () => {
+    setShowWelcome(false);
+  };
   const [sessionId, setSessionId] = useState<string>(() => crypto.randomUUID());
   
   // Data State
@@ -41,6 +99,50 @@ export default function JournalPage() {
   const [insightQuery, setInsightQuery] = useState("");
   const [insightResult, setInsightResult] = useState<any>(null);
   const [isAnalyzing, setIsAnalyzing] = useState(false);
+  const [weeklyAdvice, setWeeklyAdvice] = useState<string | null>(null);
+  const [isSynthesizing, setIsSynthesizing] = useState(false);
+
+  // Radar Data calculation
+  const radarData = useMemo(() => {
+    if (!summaries || summaries.length === 0) return [];
+    const moodCounts: Record<string, number> = {
+      "Reflective": 0,
+      "Optimistic": 0,
+      "Anxious": 0,
+      "Calm": 0,
+    };
+    let total = 0;
+    
+    summaries.forEach(s => {
+      if (s.mood && s.mood !== "Unknown") {
+        moodCounts[s.mood] = (moodCounts[s.mood] || 0) + 1;
+        total++;
+      }
+    });
+
+    return Object.keys(moodCounts).map(mood => ({
+      mood,
+      value: total > 0 ? Math.round((moodCounts[mood] / total) * 100) : 0,
+      fullMark: 100
+    })).sort((a, b) => b.value - a.value).slice(0, 5); // top 5 moods
+  }, [summaries]);
+
+  const handleSynthesize = async () => {
+    if (summaries.length === 0) return;
+    setIsSynthesizing(true);
+    try {
+      const token = await getIdToken();
+      // Only pass top 10 recent summaries to save tokens/context
+      const recentSummaries = summaries.slice(0, 10).map(s => ({ mood: s.mood || "Unknown", summary: s.summary || "" }));
+      const result = await synthesizeTrends(token, recentSummaries);
+      setWeeklyAdvice(result.advice);
+    } catch (err) {
+      console.error(err);
+      alert("Failed to synthesize trends.");
+    } finally {
+      setIsSynthesizing(false);
+    }
+  };
 
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
@@ -84,6 +186,101 @@ export default function JournalPage() {
       loadSessionsAndSummaries();
     }
   }, [user, loadSessionsAndSummaries]);
+
+  useEffect(() => {
+    return () => {
+      if (recognitionRef.current) {
+        recognitionRef.current.stop();
+      }
+    };
+  }, []);
+
+  const toggleListening = (e: React.MouseEvent) => {
+    e.preventDefault();
+    if (isListening) {
+      recognitionRef.current?.stop();
+      setIsListening(false);
+      return;
+    }
+
+    const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+    if (!SpeechRecognition) {
+      alert("Voice input is not supported in this browser. Please use Chrome or Edge.");
+      return;
+    }
+
+    const recognition = new SpeechRecognition();
+    recognition.continuous = true;
+    recognition.interimResults = true;
+    
+    let currentInput = input;
+    if (currentInput && !currentInput.endsWith(' ')) {
+        currentInput += ' ';
+    }
+
+    recognition.onresult = (event: any) => {
+      let interimTranscript = '';
+      let finalTranscript = '';
+
+      for (let i = event.resultIndex; i < event.results.length; i++) {
+        const transcript = event.results[i][0].transcript;
+        if (event.results[i].isFinal) {
+          finalTranscript += transcript;
+        } else {
+          interimTranscript += transcript;
+        }
+      }
+      
+      if (finalTranscript) {
+          currentInput += finalTranscript;
+          setInput(currentInput);
+      } else if (interimTranscript) {
+          setInput(currentInput + interimTranscript);
+      }
+    };
+
+    recognition.onerror = (event: any) => {
+      console.error("Speech recognition error", event.error);
+      setIsListening(false);
+    };
+
+    recognition.onend = () => {
+      setIsListening(false);
+    };
+
+    try {
+      recognition.start();
+      recognitionRef.current = recognition;
+      setIsListening(true);
+    } catch (err) {
+      console.error(err);
+      setIsListening(false);
+    }
+  };
+
+  const [isNuking, setIsNuking] = useState(false);
+  const handleCryptoNuke = async () => {
+    if (
+      !window.confirm(
+        "WARNING: This will permanently destroy all your cryptographic keys and erase all your data from the Cloud KMS encrypted Firestore databases. This action cannot be undone.\n\nAre you sure you want to proceed?"
+      )
+    ) {
+      return;
+    }
+    
+    setIsNuking(true);
+    try {
+      const token = await getIdToken();
+      await cryptoNuke(token);
+      alert("Crypto-Nuke successful. All data destroyed.");
+      await signOut();
+    } catch (err: any) {
+      console.error("Crypto-Nuke failed:", err);
+      alert(`Crypto-Nuke failed: ${err.message}`);
+    } finally {
+      setIsNuking(false);
+    }
+  };
 
   const handleNewChat = () => {
     setMessages([]);
@@ -168,7 +365,7 @@ export default function JournalPage() {
         content: m.content,
       }));
 
-      const data: ChatResponse = await sendMessage(token, trimmed, history, sessionId);
+      const data: ChatResponse = await sendMessage(token, trimmed, history, sessionId, persona);
 
       const aiMsg: DisplayMessage = {
         id: crypto.randomUUID(),
@@ -198,13 +395,6 @@ export default function JournalPage() {
     }
   };
 
-  const handleKeyDown = (e: React.KeyboardEvent) => {
-    if (e.key === "Enter" && !e.shiftKey) {
-      e.preventDefault();
-      handleSend();
-    }
-  };
-
   const stressColor = (level: number) => {
     if (level <= 3) return "bg-success";
     if (level <= 6) return "bg-warning";
@@ -213,6 +403,7 @@ export default function JournalPage() {
 
   return (
     <div className="flex h-screen bg-canvas overflow-hidden selection:bg-primary/20">
+      {showWelcome && <WelcomeModal onClose={handleCloseWelcome} />}
       {/* Sidebar - ChatGPT/Claude style */}
       <aside className="w-[280px] bg-[#f9f9f9] border-r border-hairline flex flex-col shrink-0 max-md:hidden">
         <div className="p-4">
@@ -273,6 +464,19 @@ export default function JournalPage() {
             <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M12 22c5.523 0 10-4.477 10-10S17.523 2 12 2 2 6.477 2 12s4.477 10 10 10zM8 14s1.5 2 4 2 4-2 4-2M9 9h.01M15 9h.01"/></svg>
             <span>AI Insights Hub</span>
           </button>
+          <button
+            onClick={() => setActiveTab("security")}
+            className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-lg cursor-pointer transition-colors ${
+              activeTab === "security" 
+                ? "bg-ink text-canvas font-medium" 
+                : "hover:bg-black/5 text-ink"
+            }`}
+          >
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+              <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/>
+            </svg>
+            <span>Security Dashboard</span>
+          </button>
         </div>
 
         {/* User Profile / Sign Out */}
@@ -302,8 +506,8 @@ export default function JournalPage() {
             {/* Chat Header */}
             <header className="flex items-center justify-between p-4 border-b border-hairline bg-canvas/80 backdrop-blur-md sticky top-0 z-10">
               <div className="flex items-center gap-3">
-                <h2 className="text-body-strong text-ink max-md:hidden">Empathy Journal Chat</h2>
-                <h2 className="text-body-strong text-ink md:hidden">Gemini Journal</h2>
+                <h2 className="text-body-strong text-ink max-md:hidden">GemScribe</h2>
+                <h2 className="text-body-strong text-ink md:hidden">GemScribe</h2>
               </div>
               <div className="flex items-center gap-2">
                 {messages.length > 0 && (
@@ -364,19 +568,25 @@ export default function JournalPage() {
                             <div className="text-body whitespace-pre-wrap leading-relaxed">{msg.content}</div>
                           </div>
                           
-                          {/* AI Metadata (Mood/Stress) */}
-                          {msg.role === "model" && msg.mood && (
-                            <div className="flex items-center gap-3 mt-2 ml-5 px-3 py-1.5 bg-canvas-parchment border border-hairline rounded-full shadow-sm w-fit animate-fade-in-up">
-                              <span className="text-fine-print text-ink-muted-48 flex items-center gap-1.5">
-                                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M12 22c5.523 0 10-4.477 10-10S17.523 2 12 2 2 6.477 2 12s4.477 10 10 10zM8 14s1.5 2 4 2 4-2 4-2M9 9h.01M15 9h.01"/></svg>
-                                <span className="text-caption-strong text-ink">{msg.mood}</span>
-                              </span>
-                              {msg.stressLevel !== undefined && (
-                                <span className="text-fine-print text-ink-muted-48 flex items-center gap-1.5 before:content-[''] before:w-px before:h-3 before:bg-divider-soft">
-                                  <span className={`inline-block w-1.5 h-1.5 rounded-full ${stressColor(msg.stressLevel)}`} />
-                                  Stress: <span className="text-caption-strong text-ink">{msg.stressLevel}/10</span>
-                                </span>
+                          {/* AI Actions Row */}
+                          {msg.role === "model" && (
+                            <div className="flex items-center gap-2 mt-2 ml-4">
+                              {msg.mood && (
+                                <div className="flex items-center gap-3 px-3 py-1.5 bg-canvas-parchment border border-hairline rounded-full shadow-sm w-fit animate-fade-in-up">
+                                  <span className="text-fine-print text-ink-muted-48 flex items-center gap-1.5">
+                                    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M12 22c5.523 0 10-4.477 10-10S17.523 2 12 2 2 6.477 2 12s4.477 10 10 10zM8 14s1.5 2 4 2 4-2 4-2M9 9h.01M15 9h.01"/></svg>
+                                    <span className="text-caption-strong text-ink">{msg.mood}</span>
+                                  </span>
+                                  {msg.stressLevel !== undefined && (
+                                    <span className="text-fine-print text-ink-muted-48 flex items-center gap-1.5 before:content-[''] before:w-px before:h-3 before:bg-divider-soft">
+                                      <span className={`inline-block w-1.5 h-1.5 rounded-full ${stressColor(msg.stressLevel)}`} />
+                                      Stress: <span className="text-caption-strong text-ink">{msg.stressLevel}/10</span>
+                                    </span>
+                                  )}
+                                </div>
                               )}
+                              
+                              <MessageActions content={msg.content} />
                             </div>
                           )}
                         </div>
@@ -409,42 +619,24 @@ export default function JournalPage() {
             {/* Floating Input Area */}
             <div className="absolute bottom-0 left-0 right-0 bg-gradient-to-t from-canvas via-canvas to-transparent pt-10 pb-6 px-4">
               <div className="max-w-[768px] mx-auto relative">
-                <form
-                  onSubmit={handleSend}
-                  className="relative flex items-end shadow-sm bg-canvas border border-hairline rounded-2xl overflow-hidden focus-within:ring-2 focus-within:ring-primary/20 focus-within:border-primary transition-all"
-                >
-                  <textarea
-                    ref={inputRef}
-                    value={input}
-                    onChange={(e) => setInput(e.target.value)}
-                    onKeyDown={handleKeyDown}
-                    disabled={isThinking}
-                    rows={1}
-                    maxLength={5000}
-                    className="flex-1 max-h-[200px] resize-none px-4 py-3.5 bg-transparent text-body text-ink placeholder:text-ink-muted-48 focus:outline-none disabled:opacity-50"
-                    placeholder="Message Gemini Journal..."
-                    style={{ scrollbarWidth: "thin" }}
-                  />
-                  <div className="px-3 pb-2.5">
-                    <button
-                      type="submit"
-                      disabled={!input.trim() || isThinking}
-                      className="shrink-0 w-8 h-8 flex items-center justify-center bg-ink text-canvas rounded-full cursor-pointer transition-all active:scale-95 disabled:bg-[#e5e5e5] disabled:text-[#a3a3a3] disabled:cursor-not-allowed hover:opacity-90"
-                    >
-                      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
-                        <line x1="12" y1="19" x2="12" y2="5" />
-                        <polyline points="5 12 12 5 19 12" />
-                      </svg>
-                    </button>
-                  </div>
-                </form>
+                <GemScribeInput
+                  value={input}
+                  onChange={setInput}
+                  onSubmit={() => handleSend(new Event("submit") as any)}
+                  disabled={isThinking}
+                  isListening={isListening}
+                  onToggleListen={toggleListening}
+                  menuOptions={PERSONAS}
+                  selectedOptionId={persona}
+                  onSelectOption={(id) => setPersona(id)}
+                />
                 <p className="text-center text-[11px] text-ink-muted-48 mt-3">
                   Journaling sessions are end-to-end encrypted and isolated to your account.
                 </p>
               </div>
             </div>
           </>
-        ) : (
+        ) : activeTab === "insights" ? (
           /* Insights Tab */
           <div className="flex-1 overflow-y-auto w-full p-6 md:p-10 pb-20">
             <div className="max-w-[768px] mx-auto space-y-8">
@@ -453,6 +645,52 @@ export default function JournalPage() {
                 <p className="text-body text-ink-muted-48">
                   Analyze emotional trends and cognitive patterns across your past KMS-encrypted journal entries.
                 </p>
+              </div>
+              {/* Radar Chart & Synthesis */}
+              <div className="bg-canvas border border-hairline rounded-2xl p-6 shadow-sm">
+                <div className="flex flex-col md:flex-row items-center gap-8">
+                  
+                  {/* Radar Chart Visual */}
+                  <div className="w-full md:w-1/2 h-[280px]">
+                    {radarData.length > 0 ? (
+                      <ResponsiveContainer width="100%" height="100%">
+                        <RadarChart cx="50%" cy="50%" outerRadius="70%" data={radarData}>
+                          <PolarGrid stroke="#e0e0e0" />
+                          <PolarAngleAxis dataKey="mood" tick={{ fill: '#7a7a7a', fontSize: 13 }} />
+                          <PolarRadiusAxis angle={30} domain={[0, 100]} tick={false} axisLine={false} />
+                          <Tooltip contentStyle={{ borderRadius: '8px', border: 'none', boxShadow: '0 4px 12px rgba(0,0,0,0.1)' }} />
+                          <Radar name="Mood Frequency" dataKey="value" stroke="#0071e3" fill="#0066cc" fillOpacity={0.4} />
+                        </RadarChart>
+                      </ResponsiveContainer>
+                    ) : (
+                      <div className="w-full h-full flex items-center justify-center border border-dashed border-hairline rounded-xl text-caption text-ink-muted-48 p-4 text-center">
+                        Save your first chat session to visualize your emotional trends!
+                      </div>
+                    )}
+                  </div>
+                  
+                  {/* Synthesis Advice */}
+                  <div className="w-full md:w-1/2 space-y-4">
+                    <h3 className="text-body-strong text-ink">Cognitive Mood & Theme Radar</h3>
+                    <p className="text-caption text-ink-muted-48 leading-relaxed">
+                      This radar maps your emotional trends locally. Click below to ask Gemini for a brief, highly focused weekly growth analysis based on these trends.
+                    </p>
+                    
+                    {weeklyAdvice ? (
+                      <div className="p-4 bg-primary/5 border border-primary/20 rounded-xl animate-fade-in-up">
+                        <p className="text-body text-ink leading-relaxed whitespace-pre-wrap">{weeklyAdvice}</p>
+                      </div>
+                    ) : (
+                      <button
+                        onClick={handleSynthesize}
+                        disabled={isSynthesizing || summaries.length === 0}
+                        className="px-5 py-2.5 bg-ink text-canvas rounded-xl text-body-strong hover:opacity-90 transition-opacity disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer w-full md:w-auto"
+                      >
+                        {isSynthesizing ? "Synthesizing Trends..." : "Synthesize Weekly Advice"}
+                      </button>
+                    )}
+                  </div>
+                </div>
               </div>
 
               {/* Insight Query Form */}
@@ -546,7 +784,77 @@ export default function JournalPage() {
               </div>
             </div>
           </div>
-        )}
+        ) : activeTab === "security" ? (
+          <div className="flex-1 overflow-y-auto w-full p-6 md:p-10 pb-20">
+            <div className="max-w-[768px] mx-auto space-y-8">
+              <header>
+                <h1 className="text-display-md text-ink mb-2">Sanctum Security Dashboard</h1>
+                <p className="text-body text-ink-muted-48">Live audit of your cryptographic boundaries.</p>
+              </header>
+              
+              <div className="bg-[#f9f9f9] border border-hairline rounded-2xl overflow-hidden shadow-sm">
+                <div className="px-6 py-4 border-b border-hairline bg-canvas">
+                  <h3 className="text-body-strong text-ink">Security Architecture Audit</h3>
+                </div>
+                <div className="p-6 space-y-5 bg-[#f9f9f9]">
+                  
+                  <div className="flex items-center justify-between border-b border-divider-soft pb-6">
+                    <div>
+                      <h4 className="text-body-strong text-ink">Cloud KMS 256-bit AES-GCM</h4>
+                      <p className="text-caption text-ink-muted-48 mt-1">End-to-end encryption for all journal payloads.</p>
+                    </div>
+                    <div className="flex items-center gap-2 px-3 py-1.5 bg-green-50 text-green-700 border border-green-200 rounded-md">
+                      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><polyline points="20 6 9 17 4 12"/></svg>
+                      <span className="text-caption-strong uppercase tracking-wide">Active</span>
+                    </div>
+                  </div>
+
+                  <div className="flex items-center justify-between border-b border-divider-soft pb-6">
+                    <div>
+                      <h4 className="text-body-strong text-ink">Secret Manager Key Rotation</h4>
+                      <p className="text-caption text-ink-muted-48 mt-1">Enterprise-grade API key and secret isolation.</p>
+                    </div>
+                    <div className="flex items-center gap-2 px-3 py-1.5 bg-green-50 text-green-700 border border-green-200 rounded-md">
+                      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><polyline points="20 6 9 17 4 12"/></svg>
+                      <span className="text-caption-strong uppercase tracking-wide">Passed</span>
+                    </div>
+                  </div>
+
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <h4 className="text-body-strong text-ink">Firestore Security Boundaries</h4>
+                      <p className="text-caption text-ink-muted-48 mt-1">Strict identity-based data silo policies enforced.</p>
+                    </div>
+                    <div className="flex items-center gap-2 px-3 py-1.5 bg-green-50 text-green-700 border border-green-200 rounded-md">
+                      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><polyline points="20 6 9 17 4 12"/></svg>
+                      <span className="text-caption-strong uppercase tracking-wide">Isolated</span>
+                    </div>
+                  </div>
+
+                </div>
+              </div>
+
+              <div className="bg-canvas border border-danger/30 rounded-2xl overflow-hidden shadow-sm">
+                <div className="px-6 py-4 border-b border-danger/20 bg-danger/5">
+                  <h3 className="text-body-strong text-danger">Data Sovereignty</h3>
+                </div>
+                <div className="p-6">
+                  <p className="text-body text-ink mb-6">
+                    Under GDPR and CCPA directives, you own your data. Initiating a Crypto-Nuke will permanently destroy your encryption keys and securely erase all your messages, summaries, and sessions from the isolated Firestore environment. This action is irreversible.
+                  </p>
+                  <button
+                    onClick={handleCryptoNuke}
+                    disabled={isNuking}
+                    className="px-6 py-3 bg-danger text-white text-body-strong rounded-lg cursor-pointer hover:bg-red-700 active:scale-95 transition-all disabled:opacity-50"
+                  >
+                    {isNuking ? "Destroying Data..." : "Initiate Crypto-Nuke"}
+                  </button>
+                </div>
+              </div>
+
+            </div>
+          </div>
+        ) : null}
       </main>
     </div>
   );

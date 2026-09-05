@@ -22,7 +22,7 @@ class GeminiClientWrapper:
 
 gemini = GeminiClientWrapper()
 
-def chat_turn(history: List[Dict[str, str]], message: str) -> Tuple[str, str, int]:
+def chat_turn(history: List[Dict[str, str]], message: str, persona: str = "Empathic Listener") -> Tuple[str, str, int]:
     """
     Sends a message to Gemini and returns the reply, mood, and stress level.
     """
@@ -41,11 +41,19 @@ def chat_turn(history: List[Dict[str, str]], message: str) -> Tuple[str, str, in
         )
     )
 
-    system_instruction = """You are a thoughtful, empathetic journaling assistant. Help the user 
-reflect on their thoughts, brainstorm ideas, and process their feelings. Be supportive but honest.
+    persona_prompts = {
+        "Empathic Listener": "You are a thoughtful, empathetic journaling assistant. Help the user reflect on their thoughts, brainstorm ideas, and process their feelings. Be supportive but honest.",
+        "Socratic Coach": "You are a Socratic Coach. Do not just agree with the user. Ask probing questions, challenge their underlying assumptions, and force them to think critically and deeply about their situation.",
+        "Devil's Advocate": "You are a Devil's Advocate. You safely but firmly critique the user's ideas, especially regarding startups, projects, or plans. Point out blind spots, risks, and counter-arguments.",
+        "Executive Summarizer": "You are an Executive Summarizer. You are extremely direct and concise. Respond mostly with bullet points, actionable items, and high-level summaries. Cut the fluff."
+    }
+
+    base_instruction = persona_prompts.get(persona, persona_prompts["Empathic Listener"])
+
+    system_instruction = f"""{base_instruction}
 
 After your response, on a new line, output a JSON block with exactly this format:
-{"mood": "<single word emotion>", "stress_level": <integer 1-10>}
+{{"mood": "<single word emotion>", "stress_level": <integer 1-10>}}
 
 The mood should be one word like: Calm, Anxious, Joyful, Reflective, Frustrated, Hopeful, Sad, Energized, Grateful, Overwhelmed.
 Stress level: 1 = very relaxed, 10 = extremely stressed.
@@ -147,3 +155,22 @@ def _parse_chat_response(raw: str) -> Tuple[str, str, int]:
                 continue
 
     return raw, mood, stress_level
+
+def synthesize_trends(summaries: List[Dict[str, str]]) -> str:
+    """Synthesizes high-level weekly advice based on past summaries."""
+    context = "\n".join(f"- Mood: {s['mood']}, Summary: {s['summary']}" for s in summaries)
+
+    prompt = f"""You are an expert behavioral analyst and empathetic journal companion.
+Analyze the following past journal summaries. Identify any emotional trends, recurring topics, or shifts in mood.
+Write a concise, 2-paragraph empathetic synthesis offering growth advice or a reflective observation. 
+Do not use markdown formatting like bolding or bullet points. Keep it conversational and highly polished.
+
+Past Summaries:
+{context}"""
+
+    response = gemini.client.models.generate_content(
+        model="gemini-3.6-flash",
+        contents=prompt,
+        config=genai.types.GenerateContentConfig(temperature=0.7),
+    )
+    return response.text.strip() if response.text else "Keep journaling to generate enough data for trends!"

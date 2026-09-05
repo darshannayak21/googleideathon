@@ -10,6 +10,7 @@ class ChatRequest(BaseModel):
     message: str = Field(..., min_length=1, max_length=MAX_MESSAGE_LENGTH)
     history: List[ChatMessage] = Field(default_factory=list, max_length=MAX_HISTORY_TURNS)
     session_id: Optional[str] = Field(None, max_length=64)
+    persona: Optional[str] = Field("Empathic Listener", max_length=64)
 
 class ChatResponse(BaseModel):
     reply: str
@@ -39,3 +40,13 @@ class LookbackSummary(BaseModel):
 class LookbackResponse(BaseModel):
     insight: str
     relatedSummaries: List[LookbackSummary]
+
+class SynthesisSummary(BaseModel):
+    mood: str
+    summary: str
+
+class SynthesisRequest(BaseModel):
+    summaries: List[SynthesisSummary]
+
+class SynthesisResponse(BaseModel):
+    advice: str

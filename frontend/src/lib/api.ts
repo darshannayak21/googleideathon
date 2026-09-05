@@ -33,7 +33,8 @@ export async function sendMessage(
   token: string,
   message: string,
   history: ChatMessage[],
-  sessionId?: string
+  sessionId?: string,
+  persona: string = "Empathic Listener"
 ): Promise<ChatResponse> {
   const res = await fetch(`${API_BASE}/chat`, {
     method: "POST",
@@ -41,7 +42,7 @@ export async function sendMessage(
       "Content-Type": "application/json",
       Authorization: `Bearer ${token}`,
     },
-    body: JSON.stringify({ message, history, session_id: sessionId }),
+    body: JSON.stringify({ message, history, session_id: sessionId, persona }),
   });
 
   if (!res.ok) {
@@ -114,5 +115,31 @@ export async function lookback(
     body: JSON.stringify({ query }),
   });
   if (!res.ok) throw new Error("Failed to get insights");
+  return res.json();
+}
+
+export async function cryptoNuke(token: string): Promise<void> {
+  const res = await fetch(`${API_BASE}/security/nuke`, {
+    method: "DELETE",
+    headers: {
+      Authorization: `Bearer ${token}`,
+    },
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({ detail: `HTTP ${res.status}` }));
+    throw new Error(err.detail || `Crypto-Nuke failed: ${res.status}`);
+  }
+}
+
+export async function synthesizeTrends(token: string, summaries: { mood: string; summary: string }[]): Promise<{ advice: string }> {
+  const res = await fetch(`${API_BASE}/chat/synthesis`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${token}`,
+    },
+    body: JSON.stringify({ summaries }),
+  });
+  if (!res.ok) throw new Error("Failed to synthesize trends");
   return res.json();
 }
