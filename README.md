@@ -156,6 +156,13 @@ Type "remind me in X minutes" (or hours) in the chat, and the app will:
 
 Reminders persist across the session via `localStorage`. You can view, edit, or delete any active reminder from the Hub, or type "remove reminder" in the chat to clear them all. The AI is instructed to acknowledge the reminder instead of claiming it cannot set timers.
 
+### Native Todo List / Task Manager
+Users can even write down tasks and manage a native Todo list directly in the app.
+1. Click the blue Tasks button (list icon) in the header to open the slide-out Todo List panel.
+2. Add, edit, or check off tasks.
+3. All tasks are synced and securely stored in their own isolated Firestore collection.
+4. The Todo list perfectly matches the sleek UI of the Reminders Hub.
+
 ### AI Insights Hub
 An analytics dashboard that aggregates your emotional data across all sessions:
 - **Cognitive Mood Radar:** A live radar chart rendered with Recharts showing your overall emotional distribution across all journal entries
