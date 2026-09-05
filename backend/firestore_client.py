@@ -146,7 +146,16 @@ def create_task(uid: str, text: str) -> Dict[str, Any]:
         "updatedAt": firestore.SERVER_TIMESTAMP
     }
     _, doc_ref = tasks_ref.add(new_task)
-    return {"id": doc_ref.id, **new_task}
+    
+    import datetime
+    now_iso = datetime.datetime.now(datetime.timezone.utc).isoformat()
+    return {
+        "id": doc_ref.id,
+        "text": text,
+        "completed": False,
+        "createdAt": now_iso,
+        "updatedAt": now_iso
+    }
 
 def update_task(uid: str, task_id: str, updates: Dict[str, Any]) -> None:
     """Update an existing task (e.g. toggle completed, edit text)."""
