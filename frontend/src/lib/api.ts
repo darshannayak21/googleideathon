@@ -156,6 +156,7 @@ export async function synthesizeTrends(token: string, summaries: { mood: string;
     body: JSON.stringify({ summaries }),
   });
   if (!res.ok) throw new Error("Failed to synthesize trends");
+  return res.json();
 }
 
 export interface Task {

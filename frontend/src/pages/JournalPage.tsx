@@ -548,7 +548,7 @@ export default function JournalPage() {
       setMessages((prev) => [...prev, aiMsg]);
       
       // Auto-update sessions list to show newly created session if needed
-      loadSessionsAndSummaries();
+      loadInitialData();
     } catch (err: any) {
       setMessages((prev) => [
         ...prev,
