@@ -99,26 +99,63 @@ def toggle_summary_favorite(uid: str, summary_id: str, is_favorite: bool) -> Non
     doc_ref.update({"isFavorite": is_favorite})
 
 def delete_user_data(uid: str) -> None:
-    """
-    Wipes all user data from Firestore (sessions, messages, summaries, and the root document).
-    This simulates a GDPR Crypto-Nuke.
-    """
-    user_ref = db.collection("users").document(uid)
+    """Permanently deletes all data for the given uid across all collections."""
+    logger.warning(f"Initiating crypto-nuke for user {uid}")
     
-    # 1. Delete all summaries
-    summaries = user_ref.collection("summaries").stream()
-    for summary in summaries:
-        summary.reference.delete()
+    # 1. Delete all messages within all sessions
+    sessions_ref = db.collection("users").document(uid).collection("sessions")
+    for session_doc in sessions_ref.stream():
+        messages_ref = session_doc.reference.collection("messages")
+        for msg_doc in messages_ref.stream():
+            msg_doc.reference.delete()
+        # 2. Delete the session document itself
+        session_doc.reference.delete()
         
-    # 2. Delete all sessions and their nested messages
-    sessions = user_ref.collection("sessions").stream()
-    for session in sessions:
-        # Delete nested messages
-        messages = session.reference.collection("messages").stream()
-        for message in messages:
-            message.reference.delete()
-        # Delete session doc
-        session.reference.delete()
+    # 3. Delete all summaries
+    summaries_ref = db.collection("users").document(uid).collection("summaries")
+    for summary_doc in summaries_ref.stream():
+        summary_doc.reference.delete()
         
-    # 3. Delete root user document
-    user_ref.delete()
+    # 4. Delete all tasks
+    tasks_ref = db.collection("users").document(uid).collection("tasks")
+    for task_doc in tasks_ref.stream():
+        task_doc.reference.delete()
+        
+    # 5. Delete the main user document
+    db.collection("users").document(uid).delete()
+    
+    logger.info(f"Crypto-nuke complete for user {uid}")
+
+def get_user_tasks(uid: str) -> List[Dict[str, Any]]:
+    """Fetch all tasks for the user."""
+    tasks_ref = (
+        db.collection("users")
+        .document(uid)
+        .collection("tasks")
+        .order_by("createdAt", direction=firestore.Query.DESCENDING)
+    )
+    return [{"id": doc.id, **doc.to_dict()} for doc in tasks_ref.stream()]
+
+def create_task(uid: str, text: str) -> Dict[str, Any]:
+    """Create a new task."""
+    tasks_ref = db.collection("users").document(uid).collection("tasks")
+    new_task = {
+        "text": text,
+        "completed": False,
+        "createdAt": firestore.SERVER_TIMESTAMP,
+        "updatedAt": firestore.SERVER_TIMESTAMP
+    }
+    _, doc_ref = tasks_ref.add(new_task)
+    return {"id": doc_ref.id, **new_task}
+
+def update_task(uid: str, task_id: str, updates: Dict[str, Any]) -> None:
+    """Update an existing task (e.g. toggle completed, edit text)."""
+    task_ref = db.collection("users").document(uid).collection("tasks").document(task_id)
+    if "updatedAt" not in updates:
+        updates["updatedAt"] = firestore.SERVER_TIMESTAMP
+    task_ref.update(updates)
+
+def delete_task(uid: str, task_id: str) -> None:
+    """Delete a task."""
+    task_ref = db.collection("users").document(uid).collection("tasks").document(task_id)
+    task_ref.delete()

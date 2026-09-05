@@ -156,5 +156,55 @@ export async function synthesizeTrends(token: string, summaries: { mood: string;
     body: JSON.stringify({ summaries }),
   });
   if (!res.ok) throw new Error("Failed to synthesize trends");
-  return res.json();
+}
+
+export interface Task {
+  id: string;
+  text: string;
+  completed: boolean;
+  createdAt?: string;
+  updatedAt?: string;
+}
+
+export async function getTasks(token: string): Promise<Task[]> {
+  const res = await fetch(`${API_BASE}/tasks`, {
+    headers: { Authorization: `Bearer ${token}` },
+  });
+  if (!res.ok) throw new Error("Failed to fetch tasks");
+  const data = await res.json();
+  return data.tasks;
+}
+
+export async function createTask(token: string, text: string): Promise<Task> {
+  const res = await fetch(`${API_BASE}/tasks`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${token}`,
+    },
+    body: JSON.stringify({ text }),
+  });
+  if (!res.ok) throw new Error("Failed to create task");
+  const data = await res.json();
+  return data.task;
+}
+
+export async function updateTask(token: string, taskId: string, updates: Partial<Task>): Promise<void> {
+  const res = await fetch(`${API_BASE}/tasks/${taskId}`, {
+    method: "PATCH",
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${token}`,
+    },
+    body: JSON.stringify(updates),
+  });
+  if (!res.ok) throw new Error("Failed to update task");
+}
+
+export async function deleteTask(token: string, taskId: string): Promise<void> {
+  const res = await fetch(`${API_BASE}/tasks/${taskId}`, {
+    method: "DELETE",
+    headers: { Authorization: `Bearer ${token}` },
+  });
+  if (!res.ok) throw new Error("Failed to delete task");
 }

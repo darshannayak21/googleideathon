@@ -11,12 +11,17 @@ import {
   cryptoNuke,
   synthesizeTrends,
   toggleFavoriteSummary,
+  getTasks,
+  createTask,
+  updateTask,
+  deleteTask,
   type ChatMessage,
-  type ChatResponse 
+  type ChatResponse,
+  type Task
 } from "../lib/api";
 import GemScribeInput from "../components/ui/chat-input";
 import { Radar, RadarChart, PolarGrid, PolarAngleAxis, PolarRadiusAxis, ResponsiveContainer, Tooltip } from 'recharts';
-import { Heart, Brain, ShieldAlert, FileText, Copy, Check, ThumbsUp, ThumbsDown, RefreshCcw, Share, X, Bell, Clock, Trash, Search, Star } from "lucide-react";
+import { Heart, Brain, ShieldAlert, FileText, Copy, Check, ThumbsUp, ThumbsDown, RefreshCcw, Share, X, Bell, Clock, Trash, Search, Star, ListTodo } from "lucide-react";
 
 declare global {
   interface Window {
@@ -92,6 +97,9 @@ export default function JournalPage() {
   const [showWelcome, setShowWelcome] = useState(true);
   const [showChatSummary, setShowChatSummary] = useState(false);
   const [showRemindersHub, setShowRemindersHub] = useState(false);
+  const [showTasksHub, setShowTasksHub] = useState(false);
+  const [tasks, setTasks] = useState<Task[]>([]);
+  const [newTaskInput, setNewTaskInput] = useState("");
   const [reminders, setReminders] = useState<Reminder[]>(() => {
     try {
       const saved = localStorage.getItem("gemscribe_reminders");
@@ -244,16 +252,18 @@ export default function JournalPage() {
     }
   }, [input]);
 
-  // Load Sessions and Summaries from Backend
-  const loadSessionsAndSummaries = useCallback(async () => {
+  // Load Sessions, Summaries, and Tasks from Backend
+  const loadInitialData = useCallback(async () => {
     try {
       const token = await getIdToken();
-      const [sessionsData, summariesData] = await Promise.all([
+      const [sessionsData, summariesData, tasksData] = await Promise.all([
         getSessions(token),
         getSummaries(token),
+        getTasks(token)
       ]);
       setSessions(sessionsData);
       setSummaries(summariesData);
+      setTasks(tasksData);
     } catch (err) {
       console.error("Failed to load history:", err);
     }
@@ -261,9 +271,9 @@ export default function JournalPage() {
 
   useEffect(() => {
     if (user) {
-      loadSessionsAndSummaries();
+      loadInitialData();
     }
-  }, [user, loadSessionsAndSummaries]);
+  }, [user, loadInitialData]);
 
   useEffect(() => {
     return () => {
@@ -383,7 +393,46 @@ export default function JournalPage() {
     } catch (err) {
       console.error("Failed to load messages:", err);
     } finally {
-      setIsThinking(false);
+      setIsAnalyzing(false);
+    }
+  };
+
+  const handleCreateTask = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!newTaskInput.trim()) return;
+    try {
+      const token = await getIdToken();
+      const newTask = await createTask(token, newTaskInput.trim());
+      setTasks(prev => [newTask, ...prev]);
+      setNewTaskInput("");
+    } catch (err) {
+      console.error("Failed to create task:", err);
+    }
+  };
+
+  const handleToggleTask = async (taskId: string, currentCompleted: boolean) => {
+    try {
+      // Optimistic update
+      setTasks(prev => prev.map(t => t.id === taskId ? { ...t, completed: !currentCompleted } : t));
+      const token = await getIdToken();
+      await updateTask(token, taskId, { completed: !currentCompleted });
+    } catch (err) {
+      console.error("Failed to toggle task:", err);
+      // Revert on failure
+      setTasks(prev => prev.map(t => t.id === taskId ? { ...t, completed: currentCompleted } : t));
+    }
+  };
+
+  const handleDeleteTask = async (taskId: string) => {
+    try {
+      // Optimistic delete
+      setTasks(prev => prev.filter(t => t.id !== taskId));
+      const token = await getIdToken();
+      await deleteTask(token, taskId);
+    } catch (err) {
+      console.error("Failed to delete task:", err);
+      // We'd ideally revert here, but for simplicity we reload
+      loadInitialData();
     }
   };
 
@@ -400,7 +449,7 @@ export default function JournalPage() {
         mood: result.mood || "Neutral",
         tags: result.tags || [],
       });
-      loadSessionsAndSummaries();
+      loadInitialData();
     } catch (err: any) {
       console.error("Summarization failed:", err);
       setChatSummaryData(null);
@@ -631,6 +680,16 @@ export default function JournalPage() {
                 <h2 className="text-body-strong text-ink md:hidden">GemScribe</h2>
               </div>
               <div className="flex items-center gap-2">
+                <button
+                  onClick={() => setShowTasksHub(true)}
+                  className="p-2 text-primary bg-primary/10 hover:bg-primary/20 rounded-full transition-colors cursor-pointer relative"
+                  title="Todo List"
+                >
+                  <ListTodo className="w-5 h-5" />
+                  {tasks.filter(t => !t.completed).length > 0 && (
+                    <span className="absolute top-1.5 right-1.5 w-2 h-2 rounded-full bg-red-500" />
+                  )}
+                </button>
                 <button
                   onClick={() => setShowRemindersHub(true)}
                   className="p-2 text-ink-muted-48 hover:text-ink hover:bg-black/5 rounded-full transition-colors cursor-pointer relative"
@@ -1192,6 +1251,80 @@ export default function JournalPage() {
                   <button onClick={() => setShowChatSummary(false)} className="px-5 py-2 bg-ink text-canvas rounded-xl text-caption-strong hover:opacity-90 transition-opacity cursor-pointer mt-2">Close</button>
                 </div>
               )}
+            </div>
+          </div>
+        </div>
+      )}
+      {/* Tasks Hub Modal */}
+      {showTasksHub && (
+        <div className="fixed inset-0 z-50 flex justify-end bg-black/20 backdrop-blur-sm transition-opacity">
+          <div className="bg-canvas shadow-xl flex flex-col transform transition-transform animate-in slide-in-from-right duration-300" style={{ width: '400px', height: '100%' }}>
+            <div className="px-6 py-5 border-b border-hairline flex items-center justify-between bg-[#f9f9f9]">
+              <div className="flex items-center gap-2">
+                <ListTodo className="w-5 h-5 text-primary" />
+                <h3 className="text-body-strong text-ink">Todo List</h3>
+              </div>
+              <button onClick={() => setShowTasksHub(false)} className="p-1.5 rounded-full hover:bg-black/5 text-ink-muted-48 hover:text-ink transition-colors">
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+            
+            <div className="flex-1 overflow-y-auto p-6">
+              {tasks.length === 0 ? (
+                <div className="h-full flex flex-col items-center justify-center text-center space-y-3">
+                  <div className="w-12 h-12 rounded-full bg-primary/10 flex items-center justify-center text-primary">
+                    <Check className="w-6 h-6" />
+                  </div>
+                  <div>
+                    <h4 className="text-body-strong text-ink">All caught up!</h4>
+                    <p className="text-caption text-ink-muted-48 mt-1">Add a new task below to get started.</p>
+                  </div>
+                </div>
+              ) : (
+                <div className="space-y-3">
+                  {tasks.map(t => (
+                    <div key={t.id} className={`p-4 rounded-xl border border-hairline relative group transition-colors ${t.completed ? 'bg-[#f9f9f9] opacity-75' : 'bg-canvas hover:border-primary/30'}`}>
+                      <div className="flex items-start gap-3">
+                        <button 
+                          onClick={() => handleToggleTask(t.id, t.completed)}
+                          className={`mt-0.5 flex-shrink-0 w-5 h-5 rounded-md border flex items-center justify-center transition-colors ${t.completed ? 'bg-primary border-primary text-white' : 'border-ink-muted-48 hover:border-primary'}`}
+                        >
+                          {t.completed && <Check className="w-3.5 h-3.5" />}
+                        </button>
+                        <p className={`text-body flex-1 ${t.completed ? 'text-ink-muted-48 line-through' : 'text-ink'}`}>
+                          {t.text}
+                        </p>
+                      </div>
+                      <button 
+                        onClick={() => handleDeleteTask(t.id)}
+                        className="absolute top-3 right-3 p-1.5 rounded-full bg-red-50 text-red-500 opacity-0 group-hover:opacity-100 transition-opacity hover:bg-red-100"
+                      >
+                        <Trash className="w-4 h-4" />
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+
+            {/* Add Task Input */}
+            <div className="p-4 border-t border-hairline bg-canvas">
+              <form onSubmit={handleCreateTask} className="relative">
+                <input
+                  type="text"
+                  value={newTaskInput}
+                  onChange={(e) => setNewTaskInput(e.target.value)}
+                  placeholder="Add a new task..."
+                  className="w-full pl-4 pr-12 py-3 rounded-xl border border-hairline bg-[#f9f9f9] text-body placeholder:text-ink-muted-48 focus:outline-none focus:border-primary focus:bg-canvas transition-colors"
+                />
+                <button
+                  type="submit"
+                  disabled={!newTaskInput.trim()}
+                  className="absolute right-2 top-2 bottom-2 aspect-square flex items-center justify-center bg-primary text-white rounded-lg disabled:opacity-50 hover:opacity-90 transition-opacity"
+                >
+                  <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M5 12h14M12 5v14"/></svg>
+                </button>
+              </form>
             </div>
           </div>
         </div>
