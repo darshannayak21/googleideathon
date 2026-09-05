@@ -44,11 +44,14 @@ async def synthesize_trends_endpoint(request: SynthesisRequest, uid: str = Depen
     try:
         from backend.gemini_client import synthesize_trends
         
-        # Convert list of Pydantic models to list of dicts for the client
-        summaries_dict = [{"mood": s.mood, "summary": s.summary} for s in request.summaries]
+        # Convert list of Pydantic models to list of dicts including createdAt
+        summaries_dict = [{"mood": s.mood, "summary": s.summary, "createdAt": s.createdAt} for s in request.summaries]
         
-        advice = synthesize_trends(summaries_dict)
-        return SynthesisResponse(advice=advice)
+        result = synthesize_trends(summaries_dict)
+        return SynthesisResponse(
+            advice=result.get("advice", ""),
+            patterns=[{"observation": p["observation"], "confidence": p["confidence"]} for p in result.get("patterns", [])]
+        )
     except Exception as e:
         logger.error(f"Synthesis failed: {e}")
         raise HTTPException(status_code=500, detail="Failed to synthesize trends")

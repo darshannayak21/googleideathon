@@ -1,5 +1,5 @@
 import React, { useEffect, useState, useRef, useCallback, memo } from "react";
-import { Plus, Mic } from "lucide-react";
+import { Plus, Mic, Book } from "lucide-react";
 
 // ===== TYPES =====
 
@@ -20,6 +20,7 @@ export interface ChatInputProps {
   menuOptions?: { id: string; label: string; icon: React.ReactNode }[];
   selectedOptionId?: string;
   onSelectOption?: (id: string) => void;
+  onSummaryClick?: () => void;
 }
 
 // ... internal props ...
@@ -205,7 +206,8 @@ export default function GemScribeInput({
   textColor = "#1d1d1f",
   menuOptions = [],
   selectedOptionId,
-  onSelectOption
+  onSelectOption,
+  onSummaryClick
 }: ChatInputProps) {
   const [isMenuOpen, setIsMenuOpen] = useState(false);
   const containerRef = useRef<HTMLDivElement | null>(null);
@@ -263,6 +265,20 @@ export default function GemScribeInput({
         }}
       >
         <div className="flex items-center relative z-20 w-full min-h-[32px]">
+          {onSummaryClick && (
+            <div className="relative shrink-0 flex items-center pl-1 pr-1">
+              <button
+                type="button"
+                onClick={onSummaryClick}
+                aria-label="Summary"
+                className={`h-8 w-8 flex items-center justify-center rounded-full bg-black/5 hover:bg-black/10 text-[${textColor}] transition-all cursor-pointer`}
+                title="Summarize Chat"
+              >
+                <Book size={16} />
+              </button>
+            </div>
+          )}
+          
           {menuOptions.length > 0 && (
             <MenuButton
               toggleMenu={toggleMenu}

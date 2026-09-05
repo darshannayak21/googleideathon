@@ -3,6 +3,8 @@ const API_BASE = "/api";
 export interface ChatMessage {
   role: "user" | "model";
   content: string;
+  mood?: string;
+  stressLevel?: number;
 }
 
 export interface ChatResponse {
@@ -26,6 +28,7 @@ export interface JournalSummary {
   summary: string;
   mood?: string;
   tags?: string[];
+  isFavorite?: boolean;
   createdAt: string;
 }
 
@@ -102,6 +105,18 @@ export async function getSummaries(token: string): Promise<JournalSummary[]> {
   return data.summaries;
 }
 
+export async function toggleFavoriteSummary(token: string, summaryId: string, isFavorite: boolean): Promise<void> {
+  const res = await fetch(`${API_BASE}/summaries/${summaryId}/favorite`, {
+    method: "PATCH",
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${token}`,
+    },
+    body: JSON.stringify({ isFavorite }),
+  });
+  if (!res.ok) throw new Error("Failed to toggle favorite");
+}
+
 export async function lookback(
   token: string,
   query: string
@@ -131,7 +146,7 @@ export async function cryptoNuke(token: string): Promise<void> {
   }
 }
 
-export async function synthesizeTrends(token: string, summaries: { mood: string; summary: string }[]): Promise<{ advice: string }> {
+export async function synthesizeTrends(token: string, summaries: { mood: string; summary: string; createdAt?: string }[]): Promise<{ advice: string; patterns?: { observation: string; confidence: string }[] }> {
   const res = await fetch(`${API_BASE}/chat/synthesis`, {
     method: "POST",
     headers: {

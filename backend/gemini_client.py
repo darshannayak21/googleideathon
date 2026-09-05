@@ -52,6 +52,9 @@ def chat_turn(history: List[Dict[str, str]], message: str, persona: str = "Empat
 
     system_instruction = f"""{base_instruction}
 
+IMPORTANT: Do not use markdown bolding (asterisks like **) anywhere in your response to keep the text clean. You may use bullet points (-) for lists.
+IMPORTANT: The app has a native reminder/timer system. If the user asks you to remind them of something, DO NOT say you cannot do it. Instead, enthusiastically confirm that their reminder has been set!
+
 After your response, on a new line, output a JSON block with exactly this format:
 {{"mood": "<single word emotion>", "stress_level": <integer 1-10>}}
 
@@ -156,14 +159,21 @@ def _parse_chat_response(raw: str) -> Tuple[str, str, int]:
 
     return raw, mood, stress_level
 
-def synthesize_trends(summaries: List[Dict[str, str]]) -> str:
-    """Synthesizes high-level weekly advice based on past summaries."""
-    context = "\n".join(f"- Mood: {s['mood']}, Summary: {s['summary']}" for s in summaries)
+def synthesize_trends(summaries: List[Dict[str, str]]) -> Dict[str, Any]:
+    """Synthesizes temporal-aware mood analysis and growth advice from past summaries."""
+    context = "\n".join(
+        f"- Date: {s.get('createdAt', 'unknown')}, Mood: {s['mood']}, Summary: {s['summary']}"
+        for s in summaries
+    )
 
     prompt = f"""You are an expert behavioral analyst and empathetic journal companion.
-Analyze the following past journal summaries. Identify any emotional trends, recurring topics, or shifts in mood.
-Write a concise, 2-paragraph empathetic synthesis offering growth advice or a reflective observation. 
-Do not use markdown formatting like bolding or bullet points. Keep it conversational and highly polished.
+Analyze the following timestamped journal summaries. Your goal:
+1. Identify temporal patterns (e.g. "You tend to express higher anxiety on weekday evenings" or "Your mood lifts when you talk about creative projects").
+2. Spot recurring emotional themes and shifts over time.
+3. Offer a concise, warm, 2-paragraph growth reflection.
+
+Output as JSON:
+{{"advice": "<your 2-paragraph advice, no markdown>", "patterns": [{{"observation": "<pattern>", "confidence": "high" | "medium" | "low"}}]}}
 
 Past Summaries:
 {context}"""
@@ -173,4 +183,16 @@ Past Summaries:
         contents=prompt,
         config=genai.types.GenerateContentConfig(temperature=0.7),
     )
-    return response.text.strip() if response.text else "Keep journaling to generate enough data for trends!"
+    raw = response.text.strip() if response.text else "{}"
+    if raw.startswith("```"):
+        raw = raw.split("\n", 1)[1] if "\n" in raw else raw[3:]
+        raw = raw.rsplit("```", 1)[0].strip()
+    try:
+        data = json.loads(raw)
+        return {
+            "advice": data.get("advice", raw),
+            "patterns": data.get("patterns", []),
+        }
+    except json.JSONDecodeError:
+        return {"advice": raw, "patterns": []}
+

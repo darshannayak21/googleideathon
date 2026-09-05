@@ -1,7 +1,7 @@
 from fastapi import APIRouter, Depends, HTTPException
-from backend.models import SummarizeRequest, SummarizeResponse
+from backend.models import SummarizeRequest, SummarizeResponse, FavoriteToggleRequest
 from backend.auth import verify_token
-from backend.firestore_client import get_session_messages, save_summary, get_user_summaries
+from backend.firestore_client import get_session_messages, save_summary, get_user_summaries, toggle_summary_favorite
 from backend.gemini_client import summarize_conversation, get_embedding
 from backend.encryption import encrypt, decrypt
 import logging
@@ -57,7 +57,8 @@ async def summarize(request: SummarizeRequest, uid: str = Depends(verify_token))
             session_id=request.session_id,
             summary=plaintext_summary, # Return plaintext to caller who just authored it
             mood=summary_data["mood"],
-            tags=summary_data["tags"]
+            tags=summary_data["tags"],
+            isFavorite=False
         )
     except HTTPException as e:
         _log_debug(f"HTTPException: {e.status_code} {e.detail}")
@@ -68,7 +69,7 @@ async def summarize(request: SummarizeRequest, uid: str = Depends(verify_token))
         with open("backend_error.log", "w") as f:
             f.write(tb)
         logger.error(f"Summarize failed: {e}")
-        raise HTTPException(status_code=500, detail="Internal server error")
+        raise HTTPException(status_code=500, detail=f"API Error: {str(e)}")
 
 @router.get("/summaries")
 async def list_summaries(uid: str = Depends(verify_token)):
@@ -85,6 +86,7 @@ async def list_summaries(uid: str = Depends(verify_token)):
                     "summary": plaintext,
                     "mood": s.get("mood"),
                     "tags": s.get("tags", []),
+                    "isFavorite": s.get("isFavorite", False),
                     "createdAt": str(s.get("createdAt", "")),
                 })
             except Exception as e:
@@ -95,4 +97,13 @@ async def list_summaries(uid: str = Depends(verify_token)):
         return {"summaries": formatted}
     except Exception as e:
         logger.error(f"Failed to list summaries: {e}")
+        raise HTTPException(status_code=500, detail="Internal server error")
+
+@router.patch("/summaries/{summary_id}/favorite")
+async def toggle_favorite(summary_id: str, request: FavoriteToggleRequest, uid: str = Depends(verify_token)):
+    try:
+        toggle_summary_favorite(uid, summary_id, request.isFavorite)
+        return {"status": "success", "isFavorite": request.isFavorite}
+    except Exception as e:
+        logger.error(f"Failed to toggle favorite for {summary_id}: {e}")
         raise HTTPException(status_code=500, detail="Internal server error")

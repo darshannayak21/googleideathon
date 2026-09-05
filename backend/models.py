@@ -27,6 +27,10 @@ class SummarizeResponse(BaseModel):
     summary: str
     mood: str
     tags: List[str]
+    isFavorite: Optional[bool] = False
+
+class FavoriteToggleRequest(BaseModel):
+    isFavorite: bool
 
 class LookbackRequest(BaseModel):
     query: str = Field(..., min_length=1, max_length=1000)
@@ -36,6 +40,7 @@ class LookbackSummary(BaseModel):
     summary: str
     mood: str
     tags: List[str]
+    isFavorite: Optional[bool] = False
 
 class LookbackResponse(BaseModel):
     insight: str
@@ -44,9 +49,15 @@ class LookbackResponse(BaseModel):
 class SynthesisSummary(BaseModel):
     mood: str
     summary: str
+    createdAt: str = ""
 
 class SynthesisRequest(BaseModel):
     summaries: List[SynthesisSummary]
 
+class TrendPattern(BaseModel):
+    observation: str
+    confidence: str
+
 class SynthesisResponse(BaseModel):
     advice: str
+    patterns: List[TrendPattern] = []

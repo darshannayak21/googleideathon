@@ -7,7 +7,7 @@ interface WelcomeModalProps {
 export function WelcomeModal({ onClose }: WelcomeModalProps) {
   return (
     <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/30 backdrop-blur-md p-4">
-      <div className="w-[90vw] md:w-[500px] shrink-0 rounded-[32px] bg-canvas border border-hairline p-10 shadow-2xl animate-fade-in-up">
+      <div className="w-[90vw] md:w-[650px] shrink-0 rounded-[32px] bg-canvas border border-hairline p-8 md:p-10 shadow-2xl animate-fade-in-up max-h-[95vh] overflow-y-auto">
         {/* Header */}
         <div className="mb-10 text-center">
           <h1 className="text-display-md text-ink mb-2">
@@ -19,7 +19,7 @@ export function WelcomeModal({ onClose }: WelcomeModalProps) {
         </div>
 
         {/* Features */}
-        <div className="mb-10 space-y-8">
+        <div className="mb-8 grid grid-cols-1 md:grid-cols-2 gap-8">
           
           <div className="flex items-start gap-4">
             <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl bg-canvas-parchment text-ink shadow-sm">
@@ -44,7 +44,7 @@ export function WelcomeModal({ onClose }: WelcomeModalProps) {
                 AI Insights Hub
               </h3>
               <p className="text-caption text-ink-muted-80 leading-relaxed">
-                Visualize your emotional trends with the Cognitive Mood Radar and get weekly synthesis advice.
+                Visualize emotional trends via the Cognitive Mood Radar, get weekly advice, and search by specific calendar dates.
               </p>
             </div>
           </div>
@@ -58,8 +58,24 @@ export function WelcomeModal({ onClose }: WelcomeModalProps) {
                 Military-Grade Security
               </h3>
               <p className="text-caption text-ink-muted-80 leading-relaxed">
-                Cloud KMS AES-256 encryption. Verify your isolated status live or invoke the Crypto-Nuke.
+                Cloud KMS AES-256 encryption. Verify your isolated status live or invoke the Crypto-Nuke to erase everything.
               </p>
+            </div>
+          </div>
+
+          <div className="flex items-start gap-4">
+            <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl bg-canvas-parchment text-ink shadow-sm">
+              <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M4 19.5v-15A2.5 2.5 0 0 1 6.5 2H20v20H6.5a2.5 2.5 0 0 1 0-5H20"/></svg>
+            </div>
+            <div className="pt-0.5">
+              <h3 className="mb-1 text-body-strong text-ink">
+                Purpose Journal
+              </h3>
+              <div className="text-fine-print text-ink-muted-80 space-y-1 mt-1">
+                <p>• <b>Timers:</b> Set/manage native reminders in the Hub.</p>
+                <p>• <b>Auto-Summaries:</b> Chats summarized & tagged securely.</p>
+                <p>• <b>Dynamic Radar:</b> View emotional shifts per session.</p>
+              </div>
             </div>
           </div>
 

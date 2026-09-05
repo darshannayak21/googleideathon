@@ -35,7 +35,15 @@ async def list_messages(session_id: str, uid: str = Depends(verify_token)):
             # We treat empty as 404 since a valid session would have messages
             raise HTTPException(status_code=404, detail="Session not found")
         
-        formatted = [{"role": m.get("role"), "content": m.get("content")} for m in messages]
+        formatted = [
+            {
+                "role": m.get("role"), 
+                "content": m.get("content"),
+                "mood": m.get("mood"),
+                "stressLevel": m.get("stress_level")
+            } 
+            for m in messages
+        ]
         return {"messages": formatted}
     except HTTPException:
         raise

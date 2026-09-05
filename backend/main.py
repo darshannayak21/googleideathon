@@ -34,7 +34,7 @@ app.add_middleware(
     CORSMiddleware,
     allow_origins=["http://localhost:5173", "https://darshanideathon.web.app", "https://darshanideathon.firebaseapp.com"],
     allow_credentials=True,
-    allow_methods=["GET", "POST", "OPTIONS"],
+    allow_methods=["GET", "POST", "PATCH", "OPTIONS", "DELETE"],
     allow_headers=["Authorization", "Content-Type"],
 )
 

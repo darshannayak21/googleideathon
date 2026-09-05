@@ -75,6 +75,7 @@ def save_summary(uid: str, session_id: str, encrypted_summary: bytes, mood: str,
         "mood": mood,
         "tags": tags,
         "embedding": embedding,
+        "isFavorite": False,
         "createdAt": firestore.SERVER_TIMESTAMP,
     }
     doc_ref = db.collection("users").document(uid).collection("summaries").document()
@@ -91,6 +92,11 @@ def get_user_summaries(uid: str, limit: int = 50) -> List[Dict[str, Any]]:
         .limit(limit)
     )
     return [{"id": doc.id, **doc.to_dict()} for doc in summaries_ref.stream()]
+
+def toggle_summary_favorite(uid: str, summary_id: str, is_favorite: bool) -> None:
+    """Toggles the favorite status of a summary securely scoped to uid."""
+    doc_ref = db.collection("users").document(uid).collection("summaries").document(summary_id)
+    doc_ref.update({"isFavorite": is_favorite})
 
 def delete_user_data(uid: str) -> None:
     """

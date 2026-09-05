@@ -10,12 +10,13 @@ import {
   lookback,
   cryptoNuke,
   synthesizeTrends,
+  toggleFavoriteSummary,
   type ChatMessage,
   type ChatResponse 
 } from "../lib/api";
 import GemScribeInput from "../components/ui/chat-input";
 import { Radar, RadarChart, PolarGrid, PolarAngleAxis, PolarRadiusAxis, ResponsiveContainer, Tooltip } from 'recharts';
-import { Heart, Brain, ShieldAlert, FileText, Copy, Check, ThumbsUp, ThumbsDown, RefreshCcw, Share } from "lucide-react";
+import { Heart, Brain, ShieldAlert, FileText, Copy, Check, ThumbsUp, ThumbsDown, RefreshCcw, Share, X, Bell, Clock, Trash, Search, Star } from "lucide-react";
 
 declare global {
   interface Window {
@@ -31,6 +32,12 @@ interface DisplayMessage {
   timestamp: Date;
   mood?: string;
   stressLevel?: number;
+}
+
+interface Reminder {
+  id: string;
+  text: string;
+  time: string;
 }
 
 const PERSONAS = [
@@ -83,7 +90,21 @@ export default function JournalPage() {
   const [isListening, setIsListening] = useState(false);
   const [persona, setPersona] = useState<string>("Empathic Listener");
   const [showWelcome, setShowWelcome] = useState(true);
+  const [showChatSummary, setShowChatSummary] = useState(false);
+  const [showRemindersHub, setShowRemindersHub] = useState(false);
+  const [reminders, setReminders] = useState<Reminder[]>(() => {
+    try {
+      const saved = localStorage.getItem("gemscribe_reminders");
+      return saved ? JSON.parse(saved) : [];
+    } catch {
+      return [];
+    }
+  });
   const recognitionRef = useRef<any>(null);
+
+  useEffect(() => {
+    localStorage.setItem("gemscribe_reminders", JSON.stringify(reminders));
+  }, [reminders]);
 
   const handleCloseWelcome = () => {
     setShowWelcome(false);
@@ -94,6 +115,8 @@ export default function JournalPage() {
   const [sessions, setSessions] = useState<any[]>([]);
   const [summaries, setSummaries] = useState<any[]>([]);
   const [isSummarizing, setIsSummarizing] = useState(false);
+  const [chatSummaryData, setChatSummaryData] = useState<{summary: string; mood: string; tags: string[]} | null>(null);
+  const [chatSummaryError, setChatSummaryError] = useState<string | null>(null);
   
   // Insights State
   const [insightQuery, setInsightQuery] = useState("");
@@ -101,6 +124,56 @@ export default function JournalPage() {
   const [isAnalyzing, setIsAnalyzing] = useState(false);
   const [weeklyAdvice, setWeeklyAdvice] = useState<string | null>(null);
   const [isSynthesizing, setIsSynthesizing] = useState(false);
+
+  // Search & Filter State
+  const [searchQuery, setSearchQuery] = useState("");
+  const [activeTagFilter, setActiveTagFilter] = useState<string | null>(null);
+  const [showFavoritesOnly, setShowFavoritesOnly] = useState(false);
+  const [dateFilter, setDateFilter] = useState("");
+
+  const filteredSummaries = useMemo(() => {
+    return summaries.filter((s) => {
+      if (showFavoritesOnly && !s.isFavorite) return false;
+      if (activeTagFilter && (!s.tags || !s.tags.includes(activeTagFilter))) return false;
+      if (dateFilter) {
+        const entryDate = new Date(s.createdAt).toISOString().split('T')[0];
+        if (entryDate !== dateFilter) return false;
+      }
+      if (searchQuery.trim()) {
+        const q = searchQuery.toLowerCase();
+        const matchesSummary = s.summary.toLowerCase().includes(q);
+        const matchesTags = (s.tags || []).some((t: string) => t.toLowerCase().includes(q));
+        const matchesMood = (s.mood || "").toLowerCase().includes(q);
+        if (!matchesSummary && !matchesTags && !matchesMood) return false;
+      }
+      return true;
+    });
+  }, [summaries, showFavoritesOnly, activeTagFilter, searchQuery, dateFilter]);
+
+  const handleToggleFavorite = async (summaryId: string, currentStatus: boolean) => {
+    setSummaries(prev => prev.map(s => s.id === summaryId ? { ...s, isFavorite: !currentStatus } : s));
+    try {
+      const token = await getIdToken();
+      await toggleFavoriteSummary(token, summaryId, !currentStatus);
+    } catch (e) {
+      console.error(e);
+      setSummaries(prev => prev.map(s => s.id === summaryId ? { ...s, isFavorite: currentStatus } : s));
+    }
+  };
+
+  // Current chat mood radar (from individual message moods in the active session)
+  const chatRadarData = useMemo(() => {
+    const moodMsgs = messages.filter(m => m.role === "model" && m.mood);
+    if (moodMsgs.length === 0) return [];
+    const counts: Record<string, number> = {};
+    moodMsgs.forEach(m => { counts[m.mood!] = (counts[m.mood!] || 0) + 1; });
+    const total = moodMsgs.length;
+    return Object.entries(counts).map(([mood, count]) => ({
+      mood,
+      value: Math.round((count / total) * 100),
+      fullMark: 100
+    }));
+  }, [messages]);
 
   // Radar Data calculation
   const radarData = useMemo(() => {
@@ -127,18 +200,23 @@ export default function JournalPage() {
     })).sort((a, b) => b.value - a.value).slice(0, 5); // top 5 moods
   }, [summaries]);
 
+  const [trendPatterns, setTrendPatterns] = useState<{observation: string; confidence: string}[]>([]);
+
   const handleSynthesize = async () => {
     if (summaries.length === 0) return;
     setIsSynthesizing(true);
     try {
       const token = await getIdToken();
-      // Only pass top 10 recent summaries to save tokens/context
-      const recentSummaries = summaries.slice(0, 10).map(s => ({ mood: s.mood || "Unknown", summary: s.summary || "" }));
+      const recentSummaries = summaries.slice(0, 15).map(s => ({
+        mood: s.mood || "Unknown",
+        summary: s.summary || "",
+        createdAt: s.createdAt || ""
+      }));
       const result = await synthesizeTrends(token, recentSummaries);
       setWeeklyAdvice(result.advice);
+      if (result.patterns) setTrendPatterns(result.patterns);
     } catch (err) {
       console.error(err);
-      alert("Failed to synthesize trends.");
     } finally {
       setIsSynthesizing(false);
     }
@@ -298,6 +376,8 @@ export default function JournalPage() {
         id: crypto.randomUUID(),
         role: m.role,
         content: m.content,
+        mood: m.mood,
+        stressLevel: m.stressLevel,
         timestamp: new Date()
       })));
     } catch (err) {
@@ -310,14 +390,21 @@ export default function JournalPage() {
   const handleSummarize = async () => {
     if (messages.length === 0 || isSummarizing) return;
     setIsSummarizing(true);
+    setChatSummaryData(null);
+    setChatSummaryError(null);
     try {
       const token = await getIdToken();
-      await summarizeSession(token, sessionId);
-      alert("Session summarized and securely encrypted in KMS database!");
+      const result = await summarizeSession(token, sessionId);
+      setChatSummaryData({
+        summary: result.summary || "",
+        mood: result.mood || "Neutral",
+        tags: result.tags || [],
+      });
       loadSessionsAndSummaries();
     } catch (err: any) {
       console.error("Summarization failed:", err);
-      alert(`Summarization error: ${err.message || err}`);
+      setChatSummaryData(null);
+      setChatSummaryError(err.message || "Failed to generate summary");
     } finally {
       setIsSummarizing(false);
     }
@@ -357,6 +444,40 @@ export default function JournalPage() {
     setMessages((prev) => [...prev, userMsg]);
     setInput("");
     setIsThinking(true);
+
+    if (trimmed.toLowerCase().includes("remove the reminder") || trimmed.toLowerCase().includes("cancel reminder") || trimmed.toLowerCase().includes("remove reminder")) {
+      setReminders([]);
+    } else if (trimmed.toLowerCase().includes("remind me")) {
+      let delayMs = 60000; // default 1 min
+      const minMatch = trimmed.match(/(\d+)\s*(min|minute)/i);
+      const hourMatch = trimmed.match(/(\d+)\s*(hour|hr)/i);
+      
+      if (minMatch) {
+        delayMs = parseInt(minMatch[1]) * 60000;
+      } else if (hourMatch) {
+        delayMs = parseInt(hourMatch[1]) * 3600000;
+      }
+
+      const newReminder = {
+        id: crypto.randomUUID(),
+        text: trimmed,
+        time: new Date(Date.now() + delayMs).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+      };
+      setReminders(prev => [...prev, newReminder]);
+      
+      if ("Notification" in window) {
+        Notification.requestPermission().then(permission => {
+          if (permission === "granted") {
+            setTimeout(() => {
+              new Notification("GemScribe Reminder", { 
+                body: "Here is your requested reminder from your journal session!",
+                icon: "/favicon.ico"
+              });
+            }, delayMs);
+          }
+        });
+      }
+    }
 
     try {
       const token = await getIdToken();
@@ -510,15 +631,16 @@ export default function JournalPage() {
                 <h2 className="text-body-strong text-ink md:hidden">GemScribe</h2>
               </div>
               <div className="flex items-center gap-2">
-                {messages.length > 0 && (
-                  <button
-                    onClick={handleSummarize}
-                    disabled={isSummarizing}
-                    className="px-3.5 py-1.5 bg-primary text-canvas rounded-lg text-caption-strong cursor-pointer hover:opacity-90 transition-opacity disabled:opacity-50 flex items-center gap-1.5"
-                  >
-                    {isSummarizing ? "Saving..." : "Save & Summarize"}
-                  </button>
-                )}
+                <button
+                  onClick={() => setShowRemindersHub(true)}
+                  className="p-2 text-ink-muted-48 hover:text-ink hover:bg-black/5 rounded-full transition-colors cursor-pointer relative"
+                  title="Reminders"
+                >
+                  <Bell className="w-5 h-5" />
+                  {reminders.length > 0 && (
+                    <span className="absolute top-1.5 right-1.5 w-2 h-2 rounded-full bg-primary" />
+                  )}
+                </button>
                 <button onClick={handleNewChat} className="text-primary p-2 md:hidden">
                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M12 5v14M5 12h14" /></svg>
                 </button>
@@ -629,6 +751,10 @@ export default function JournalPage() {
                   menuOptions={PERSONAS}
                   selectedOptionId={persona}
                   onSelectOption={(id) => setPersona(id)}
+                  onSummaryClick={() => {
+                    handleSummarize();
+                    setShowChatSummary(true);
+                  }}
                 />
                 <p className="text-center text-[11px] text-ink-muted-48 mt-3">
                   Journaling sessions are end-to-end encrypted and isolated to your account.
@@ -673,7 +799,7 @@ export default function JournalPage() {
                   <div className="w-full md:w-1/2 space-y-4">
                     <h3 className="text-body-strong text-ink">Cognitive Mood & Theme Radar</h3>
                     <p className="text-caption text-ink-muted-48 leading-relaxed">
-                      This radar maps your emotional trends locally. Click below to ask Gemini for a brief, highly focused weekly growth analysis based on these trends.
+                      This radar maps your emotional trends across all sessions. Click below for temporal pattern analysis powered by Gemini.
                     </p>
                     
                     {weeklyAdvice ? (
@@ -686,12 +812,33 @@ export default function JournalPage() {
                         disabled={isSynthesizing || summaries.length === 0}
                         className="px-5 py-2.5 bg-ink text-canvas rounded-xl text-body-strong hover:opacity-90 transition-opacity disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer w-full md:w-auto"
                       >
-                        {isSynthesizing ? "Synthesizing Trends..." : "Synthesize Weekly Advice"}
+                        {isSynthesizing ? "Analyzing Patterns..." : "Analyze Mood & Trends"}
                       </button>
                     )}
                   </div>
                 </div>
               </div>
+
+              {/* Temporal Trend Patterns */}
+              {trendPatterns.length > 0 && (
+                <div className="bg-canvas border border-hairline rounded-2xl p-6 shadow-sm space-y-4 animate-fade-in-up">
+                  <h3 className="text-body-strong text-ink flex items-center gap-2">
+                    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="text-primary"><path d="M22 12h-4l-3 9L9 3l-3 9H2"/></svg>
+                    Detected Behavioral Patterns
+                  </h3>
+                  <div className="grid gap-3">
+                    {trendPatterns.map((p, i) => (
+                      <div key={i} className="flex items-start gap-3 p-3 bg-[#f9f9f9] rounded-xl">
+                        <span className={`mt-0.5 shrink-0 w-2 h-2 rounded-full ${p.confidence === 'high' ? 'bg-success' : p.confidence === 'medium' ? 'bg-warning' : 'bg-ink-muted-48'}`} />
+                        <div>
+                          <p className="text-body text-ink">{p.observation}</p>
+                          <span className="text-fine-print text-ink-muted-48 uppercase tracking-wider">{p.confidence} confidence</span>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
 
               {/* Insight Query Form */}
               <div className="bg-[#f9f9f9] border border-hairline rounded-2xl p-5 shadow-sm space-y-4">
@@ -750,11 +897,56 @@ export default function JournalPage() {
 
               {/* Past Summaries Feed */}
               <div className="space-y-4">
-                <h3 className="text-body-strong text-ink">Securely Encrypted Summaries ({summaries.length})</h3>
+                <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
+                  <h3 className="text-body-strong text-ink">Journal Entries ({filteredSummaries.length})</h3>
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <button
+                      onClick={() => setShowFavoritesOnly(!showFavoritesOnly)}
+                      className={`flex items-center gap-2 px-3 py-1.5 rounded-lg text-caption-strong transition-colors cursor-pointer border ${showFavoritesOnly ? "bg-amber-50 text-amber-600 border-amber-200" : "bg-transparent text-ink-muted-48 border-hairline hover:bg-black/5"}`}
+                    >
+                      <Star className={`w-4 h-4 ${showFavoritesOnly ? "fill-current" : ""}`} /> Favorites
+                    </button>
+                    <input 
+                      type="date"
+                      value={dateFilter}
+                      onChange={e => setDateFilter(e.target.value)}
+                      className="px-3 py-1.5 bg-canvas border border-hairline rounded-lg text-caption text-ink focus:outline-none focus:border-primary cursor-pointer"
+                      title="Filter by date"
+                    />
+                    {dateFilter && (
+                      <button onClick={() => setDateFilter("")} className="p-1.5 rounded-full bg-primary/10 text-primary hover:bg-primary/20 transition-colors cursor-pointer" title="Clear date filter">
+                        <X className="w-3.5 h-3.5" />
+                      </button>
+                    )}
+                    <div className="relative flex-1 md:w-56">
+                      <Search className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-ink-muted-48" />
+                      <input 
+                        type="text" 
+                        placeholder="Search entries..."
+                        value={searchQuery}
+                        onChange={e => setSearchQuery(e.target.value)}
+                        className="w-full pl-9 pr-4 py-1.5 bg-canvas border border-hairline rounded-lg text-caption text-ink focus:outline-none focus:border-primary"
+                      />
+                    </div>
+                  </div>
+                </div>
+
+                {activeTagFilter && (
+                  <div className="flex items-center gap-2 mb-2 animate-fade-in-up">
+                    <span className="text-caption text-ink-muted-48">Filtering by:</span>
+                    <button 
+                      onClick={() => setActiveTagFilter(null)}
+                      className="flex items-center gap-1.5 bg-primary/10 text-primary px-3 py-1 rounded-full text-caption-strong hover:bg-primary/20 transition-colors cursor-pointer"
+                    >
+                      #{activeTagFilter} <X className="w-3.5 h-3.5" />
+                    </button>
+                  </div>
+                )}
+
                 <div className="grid gap-4">
-                  {summaries.map((s) => (
-                    <div key={s.id} className="bg-canvas border border-hairline rounded-xl p-5 shadow-sm space-y-3">
-                      <div className="flex items-center justify-between">
+                  {filteredSummaries.map((s) => (
+                    <div key={s.id} className="bg-canvas border border-hairline rounded-xl p-5 shadow-sm space-y-3 relative group">
+                      <div className="flex items-center justify-between pr-8">
                         <div className="flex items-center gap-2">
                           <span className="w-2.5 h-2.5 rounded-full bg-primary/80" />
                           <span className="text-body-strong text-ink">{s.mood || "Neutral"}</span>
@@ -763,21 +955,34 @@ export default function JournalPage() {
                           {new Date(s.createdAt).toLocaleDateString()}
                         </span>
                       </div>
-                      <p className="text-body text-ink-muted-48">{s.summary}</p>
+                      
+                      <button 
+                        onClick={() => handleToggleFavorite(s.id, !!s.isFavorite)}
+                        className={`absolute top-4 right-4 p-1.5 rounded-full transition-colors cursor-pointer ${s.isFavorite ? "text-amber-400 hover:text-amber-500 hover:bg-amber-50" : "text-ink-muted-48 hover:text-ink hover:bg-black/5 opacity-0 group-hover:opacity-100"}`}
+                        title={s.isFavorite ? "Remove from Favorites" : "Add to Favorites"}
+                      >
+                        <Star className={`w-5 h-5 ${s.isFavorite ? "fill-current" : ""}`} />
+                      </button>
+
+                      <p className="text-body text-ink-muted-80">{s.summary}</p>
                       {s.tags?.length > 0 && (
-                        <div className="flex gap-1.5 flex-wrap">
+                        <div className="flex gap-1.5 flex-wrap pt-2">
                           {s.tags.map((t: string) => (
-                            <span key={t} className="text-fine-print bg-black/5 px-2.5 py-0.5 rounded-full text-ink-muted-48">
+                            <button 
+                              key={t}
+                              onClick={() => setActiveTagFilter(t === activeTagFilter ? null : t)}
+                              className={`text-fine-print px-2.5 py-0.5 rounded-full cursor-pointer transition-colors ${t === activeTagFilter ? "bg-primary text-white" : "bg-black/5 text-ink-muted-80 hover:bg-black/10"}`}
+                            >
                               #{t}
-                            </span>
+                            </button>
                           ))}
                         </div>
                       )}
                     </div>
                   ))}
-                  {summaries.length === 0 && (
+                  {filteredSummaries.length === 0 && (
                     <div className="text-center py-10 border border-dashed border-hairline rounded-xl text-caption text-ink-muted-48">
-                      No summaries archived yet. Try saving a chat conversation first!
+                      {summaries.length === 0 ? "No summaries archived yet. Try saving a chat conversation first!" : "No entries match your search filters."}
                     </div>
                   )}
                 </div>
@@ -856,6 +1061,141 @@ export default function JournalPage() {
           </div>
         ) : null}
       </main>
+
+      {/* Reminders Modal */}
+      {showRemindersHub && (
+        <div className="fixed inset-0 z-50 flex justify-end bg-black/20 backdrop-blur-sm transition-opacity">
+          <div className="bg-canvas shadow-xl flex flex-col transform transition-transform animate-in slide-in-from-right duration-300" style={{ width: '400px', height: '100%' }}>
+            <div className="px-6 py-5 border-b border-hairline flex items-center justify-between bg-[#f9f9f9]">
+              <div className="flex items-center gap-2">
+                <Bell className="w-5 h-5 text-ink" />
+                <h3 className="text-body-strong text-ink">Reminders Hub</h3>
+              </div>
+              <button onClick={() => setShowRemindersHub(false)} className="p-1.5 rounded-full hover:bg-black/5 text-ink-muted-48 hover:text-ink transition-colors">
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+            
+            <div className="flex-1 overflow-y-auto p-6">
+              {reminders.length === 0 ? (
+                <div className="h-full flex flex-col items-center justify-center text-center space-y-3">
+                  <div className="w-12 h-12 rounded-full bg-black/5 flex items-center justify-center text-ink-muted-48">
+                    <Clock className="w-6 h-6" />
+                  </div>
+                  <div>
+                    <h4 className="text-body-strong text-ink">No Reminders Yet</h4>
+                    <p className="text-caption text-ink-muted-48 mt-1">Ask GemScribe to "remind me to..." during your chat session.</p>
+                  </div>
+                </div>
+              ) : (
+                <div className="space-y-4">
+                  {reminders.map(r => (
+                    <div key={r.id} className="p-4 rounded-xl border border-hairline bg-canvas relative group hover:border-primary/30 transition-colors">
+                      <p className="text-body text-ink pr-8">{r.text}</p>
+                      <span className="text-fine-print text-ink-muted-48 mt-2 inline-block font-mono bg-black/5 px-2 py-0.5 rounded-full">{r.time}</span>
+                      <button 
+                        onClick={() => setReminders(prev => prev.filter(x => x.id !== r.id))}
+                        className="absolute top-4 right-4 p-1.5 rounded-full bg-red-50 text-red-500 opacity-0 group-hover:opacity-100 transition-opacity hover:bg-red-100"
+                      >
+                        <Trash className="w-4 h-4" />
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Chat Summary Modal */}
+      {showChatSummary && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm p-6" onClick={() => !isSummarizing && setShowChatSummary(false)}>
+          <div className="bg-canvas max-h-[85vh] rounded-2xl shadow-xl overflow-hidden flex flex-col" style={{ width: '600px', maxWidth: '90vw' }} onClick={e => e.stopPropagation()}>
+            {/* Header */}
+            <div className="px-6 py-4 border-b border-hairline flex items-center justify-between bg-[#f9f9f9] shrink-0">
+              <h3 className="text-body-strong text-ink">Current Chat Summary</h3>
+              <button onClick={() => setShowChatSummary(false)} className="p-1.5 rounded-full hover:bg-black/5 text-ink-muted-48 hover:text-ink transition-colors cursor-pointer">
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <div className="flex-1 overflow-y-auto p-6 space-y-6">
+              {isSummarizing ? (
+                <div className="flex flex-col items-center justify-center py-16 space-y-4">
+                  <div className="w-14 h-14 relative">
+                    <div className="absolute inset-0 border-4 border-primary/20 rounded-full" />
+                    <div className="absolute inset-0 border-4 border-primary border-t-transparent rounded-full animate-spin" />
+                  </div>
+                  <div className="text-center space-y-1">
+                    <h4 className="text-body-strong text-ink">Analyzing your conversation</h4>
+                    <p className="text-caption text-ink-muted-48">Extracting themes, mood, and encrypting with AES-GCM...</p>
+                  </div>
+                </div>
+              ) : chatSummaryData ? (
+                <>
+                  {/* Summary Section */}
+                  <div className="bg-[#f9f9f9] rounded-xl p-5 space-y-3">
+                    <div className="flex items-center justify-between">
+                      <h4 className="text-caption-strong text-ink-muted-48 uppercase tracking-wider">Session Overview</h4>
+                      <span className="text-caption-strong text-primary bg-primary/10 px-2.5 py-0.5 rounded-full">{chatSummaryData.mood}</span>
+                    </div>
+                    <p className="text-body text-ink leading-relaxed">{chatSummaryData.summary}</p>
+                    {chatSummaryData.tags.length > 0 && (
+                      <div className="flex gap-1.5 flex-wrap pt-1">
+                        {chatSummaryData.tags.map(t => (
+                          <span key={t} className="text-fine-print bg-black/5 px-2.5 py-0.5 rounded-full text-ink-muted-80">#{t}</span>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+
+                  {/* Radar Chart */}
+                  <div className="bg-[#f9f9f9] rounded-xl p-5 space-y-3">
+                    <h4 className="text-caption-strong text-ink-muted-48 uppercase tracking-wider">Emotional Radar</h4>
+                    {chatRadarData.length > 0 ? (
+                      <div className="h-[240px]">
+                        <ResponsiveContainer width="100%" height="100%">
+                          <RadarChart cx="50%" cy="50%" outerRadius="65%" data={chatRadarData}>
+                            <PolarGrid stroke="#e0e0e0" />
+                            <PolarAngleAxis dataKey="mood" tick={{ fill: '#7a7a7a', fontSize: 12 }} />
+                            <PolarRadiusAxis angle={30} domain={[0, 100]} tick={false} axisLine={false} />
+                            <Tooltip contentStyle={{ borderRadius: '8px', border: 'none', boxShadow: '0 4px 12px rgba(0,0,0,0.1)' }} />
+                            <Radar name="Mood Distribution" dataKey="value" stroke="#0071e3" fill="#0066cc" fillOpacity={0.35} />
+                          </RadarChart>
+                        </ResponsiveContainer>
+                      </div>
+                    ) : (
+                      <p className="text-caption text-ink-muted-48 py-4 text-center">The emotional radar will populate as Gemini detects moods in your messages.</p>
+                    )}
+                  </div>
+
+                  <button 
+                    onClick={() => {
+                      setShowChatSummary(false);
+                      setActiveTab("insights");
+                    }}
+                    className="w-full py-2.5 bg-ink text-canvas rounded-xl text-body-strong hover:opacity-90 transition-opacity cursor-pointer"
+                  >
+                    View Full Insights Hub
+                  </button>
+                </>
+              ) : (
+                <div className="flex flex-col items-center justify-center py-16 space-y-3 text-center">
+                  <div className="w-12 h-12 rounded-full bg-danger/10 flex items-center justify-center text-danger">
+                    <X className="w-6 h-6" />
+                  </div>
+                  <h4 className="text-body-strong text-ink">Could not generate summary</h4>
+                  <p className="text-caption text-ink-muted-48 max-w-sm px-4">
+                    {chatSummaryError || "Make sure you have messages in the current chat first."}
+                  </p>
+                  <button onClick={() => setShowChatSummary(false)} className="px-5 py-2 bg-ink text-canvas rounded-xl text-caption-strong hover:opacity-90 transition-opacity cursor-pointer mt-2">Close</button>
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
